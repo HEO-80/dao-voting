@@ -3,8 +3,8 @@ import { network } from "hardhat";
 
 describe("DAOVoting", function () {
   let dao, token, owner, voter1, voter2, voter3;
-  const VOTING_DURATION = 1n; // 1 second for testing
-  const QUORUM = 100n * 10n ** 18n; // 100 tokens
+  const VOTING_DURATION = 100n; // 100 seconds
+  const QUORUM = 100n * 10n ** 18n;
 
   beforeEach(async function () {
     const { ethers } = await network.connect();
@@ -13,7 +13,6 @@ describe("DAOVoting", function () {
     const Token = await ethers.getContractFactory("MockERC20");
     token = await Token.deploy("Gov Token", "GOV", 10000n * 10n ** 18n);
 
-    // Distribute tokens
     await token.transfer(voter1.address, 500n * 10n ** 18n);
     await token.transfer(voter2.address, 300n * 10n ** 18n);
     await token.transfer(voter3.address, 200n * 10n ** 18n);
@@ -37,11 +36,9 @@ describe("DAOVoting", function () {
   });
 
   it("Non token holder cannot create proposal", async function () {
-    const { ethers } = await network.connect();
-    const noTokens = ethers.Wallet.createRandom().connect(ethers.provider);
     await expect(
-      dao.connect(noTokens).createProposal("Proposal", "0x0000000000000000000000000000000000000000", "0x")
-    ).to.be.reverted;
+      dao.connect(voter3).createProposal("Proposal", "0x0000000000000000000000000000000000000000", "0x")
+    ).to.be.revertedWith("Must hold tokens to propose");
   });
 
   it("Token holder can vote", async function () {
@@ -60,31 +57,28 @@ describe("DAOVoting", function () {
   });
 
   it("Should pass proposal with enough votes", async function () {
+    const { ethers } = await network.connect();
     await dao.connect(voter1).createProposal("Proposal 1", "0x0000000000000000000000000000000000000000", "0x");
     await dao.connect(voter1).castVote(0n, true);
     await dao.connect(voter2).castVote(0n, true);
 
-    // Mine blocks to advance past voting duration
-    await network.connect().then(async ({ ethers }) => {
-      await ethers.provider.send("evm_mine", []);
-      await ethers.provider.send("evm_mine", []);
-      await ethers.provider.send("evm_mine", []);
-    });
+    const block = await ethers.provider.getBlock("latest");
+    await ethers.provider.send("evm_setNextBlockTimestamp", [block.timestamp + 101]);
+    await ethers.provider.send("evm_mine", []);
 
     await dao.finalizeProposal(0n);
     expect(await dao.getProposalState(0n)).to.equal(1n); // PASSED
   });
 
   it("Should reject proposal with more votes against", async function () {
+    const { ethers } = await network.connect();
     await dao.connect(voter1).createProposal("Proposal 1", "0x0000000000000000000000000000000000000000", "0x");
     await dao.connect(voter1).castVote(0n, false);
     await dao.connect(voter2).castVote(0n, false);
 
-    await network.connect().then(async ({ ethers }) => {
-      await ethers.provider.send("evm_mine", []);
-      await ethers.provider.send("evm_mine", []);
-      await ethers.provider.send("evm_mine", []);
-    });
+    const block = await ethers.provider.getBlock("latest");
+    await ethers.provider.send("evm_setNextBlockTimestamp", [block.timestamp + 101]);
+    await ethers.provider.send("evm_mine", []);
 
     await dao.finalizeProposal(0n);
     expect(await dao.getProposalState(0n)).to.equal(2n); // REJECTED
